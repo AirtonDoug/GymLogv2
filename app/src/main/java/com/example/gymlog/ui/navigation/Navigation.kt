@@ -1,8 +1,13 @@
 package com.example.gymlog.ui.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -12,8 +17,11 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.example.gymlog.data.repositories.AuthRepository // Supondo que você moveu para cá
 import com.example.gymlog.data.repositories.MockWorkoutRepository
 import com.example.gymlog.ui.screens.*
+import com.example.gymlog.ui.viewmodel.AuthViewModel // Supondo que você moveu para cá
+import com.example.gymlog.ui.viewmodel.AuthViewModelFactory // Supondo que você moveu para cá
 import com.example.gymlog.ui.viewmodel.FavoritesViewModel
 import com.example.gymlog.ui.viewmodel.HomeViewModel
 import com.example.gymlog.ui.viewmodel.SearchViewModel
@@ -23,10 +31,38 @@ import com.example.gymlog.ui.viewmodel.WorkoutDetailViewModel
 fun AppNavigation(
     navController: NavHostController
 ) {
-    // Cria uma única instância do repositório para ser compartilhada
+    // --- Instâncias dos Repositórios e ViewModels ---
+
+    // Repositório de Autenticação
+    val authRepository = remember { AuthRepository() }
+    val authViewModel: AuthViewModel = viewModel(factory = AuthViewModelFactory(authRepository))
+
+    // Repositório principal do App
     val repository = remember { MockWorkoutRepository() }
 
-    NavHost(navController = navController, startDestination = "home") {
+    // Define a rota inicial baseada no estado de login
+    val startDestination = if (authRepository.isUserLoggedIn()) "home" else "login"
+
+    // --- Container de Navegação Principal ---
+
+    NavHost(navController = navController, startDestination = startDestination) {
+
+        // --- Rotas de Autenticação ---
+
+        composable("login") {
+            LoginScreen(viewModel = authViewModel, navController = navController)
+        }
+
+        composable("register") {
+            RegisterScreen(viewModel = authViewModel, navController = navController)
+        }
+
+        composable("forgotPassword") {
+            ForgotPasswordScreen(viewModel = authViewModel, navController = navController)
+        }
+
+        // --- Rotas Principais do Aplicativo ---
+
         composable("home") {
             val homeViewModel: HomeViewModel = viewModel(
                 factory = object : androidx.lifecycle.ViewModelProvider.Factory {
@@ -44,12 +80,26 @@ fun AppNavigation(
         }
 
         composable("profile") {
-            ProfileScreen(navController = navController)
+            ProfileScreen(navController = navController, authViewModel = authViewModel)
         }
 
         composable("start_workout") {
             StartWorkoutScreen(navController = navController)
         }
+
+        // --- ROTA DE EDIÇÃO ATUALIZADA ---
+        composable(
+            route = "edit_workout/{logId}",
+            arguments = listOf(navArgument("logId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val logId = backStackEntry.arguments?.getString("logId")
+            // Agora aponta para a nova EditWorkoutScreen
+            EditWorkoutScreen(
+                navController = navController,
+                logId = logId
+            )
+        }
+
 
         composable(
             route = "active_workout/{workoutIdOrCustom}",

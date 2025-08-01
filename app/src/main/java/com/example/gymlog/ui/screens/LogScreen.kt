@@ -1,5 +1,9 @@
 package com.example.gymlog.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,9 +16,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.example.gymlog.models.WorkoutLogEntry // Use the updated model
+import com.example.gymlog.models.*
 import com.example.gymlog.ui.components.BottomNavigationBar
 import java.text.SimpleDateFormat
 import java.util.*
@@ -23,24 +29,39 @@ import java.util.concurrent.TimeUnit
 // Simple date formatter
 private val dateFormatter = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
-// Mock log data - Make it mutable to allow adding/deleting/editing
-val mockWorkoutLogState = mutableStateListOf<WorkoutLogEntry>(
-    // Initial mock data (can be adapted from previous LogScreen)
+// Mock log data - Adicionei dados de exercícios para visualização
+val mockWorkoutLogState = mutableStateListOf(
     WorkoutLogEntry(
         workoutName = "Treino Full Body",
-        startTime = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1); set(Calendar.HOUR_OF_DAY, 18); set(Calendar.MINUTE, 0) }.time,
-        endTime = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1); set(Calendar.HOUR_OF_DAY, 18); set(Calendar.MINUTE, 55) }.time,
+        startTime = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }.time,
         durationMillis = TimeUnit.MINUTES.toMillis(55),
         notes = "Me senti bem durante o treino.",
-        caloriesBurned = 430
-        // performedExercises would be populated here in a real scenario
+        caloriesBurned = 430,
+        performedExercises = mutableListOf(
+            PerformedExercise(exerciseId = 1, exerciseName = "Supino Reto", targetSets = 3, targetReps = 10, targetWeight = 80.0, sets = mutableListOf(
+                PerformedSet(reps = 10, weight = 80.0, isCompleted = true),
+                PerformedSet(reps = 9, weight = 80.0, isCompleted = true),
+                PerformedSet(reps = 8, weight = 80.0, isCompleted = true)
+            )),
+            PerformedExercise(exerciseId = 3, exerciseName = "Agachamento", targetSets = 3, targetReps = 12, targetWeight = 100.0, sets = mutableListOf(
+                PerformedSet(reps = 12, weight = 100.0, isCompleted = true),
+                PerformedSet(reps = 12, weight = 100.0, isCompleted = true)
+            ))
+        )
     ),
     WorkoutLogEntry(
         workoutName = "Treino de Pernas",
-        startTime = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -3); set(Calendar.HOUR_OF_DAY, 19); set(Calendar.MINUTE, 15) }.time,
-        endTime = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -3); set(Calendar.HOUR_OF_DAY, 20); set(Calendar.MINUTE, 15) }.time,
+        startTime = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -3) }.time,
         durationMillis = TimeUnit.MINUTES.toMillis(60),
-        caloriesBurned = 510
+        caloriesBurned = 510,
+        performedExercises = mutableListOf(
+            PerformedExercise(exerciseId = 8, exerciseName = "Leg Press", targetSets = 4, targetReps = 10, targetWeight = 200.0, sets = mutableListOf(
+                PerformedSet(reps = 10, weight = 200.0, isCompleted = true),
+                PerformedSet(reps = 10, weight = 220.0, isCompleted = true),
+                PerformedSet(reps = 8, weight = 220.0, isCompleted = true),
+                PerformedSet(reps = 8, weight = 220.0, isCompleted = true)
+            ))
+        )
     )
 )
 
@@ -48,17 +69,12 @@ val mockWorkoutLogState = mutableStateListOf<WorkoutLogEntry>(
 @Composable
 fun LogScreen(
     navController: NavController,
-    // Pass mutable state and actions if state is lifted later
-    // workoutLog: List<WorkoutLogEntry>,
-    // onStartWorkout: () -> Unit,
-    // onEditLog: (WorkoutLogEntry) -> Unit,
-    // onDeleteLog: (WorkoutLogEntry) -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteConfirmationDialog by rememberSaveable { mutableStateOf(false) }
     var entryToDelete by remember { mutableStateOf<WorkoutLogEntry?>(null) }
+    var expandedLogId by rememberSaveable { mutableStateOf<String?>(null) } // Estado para controlar o card expandido
 
-    // Function to handle deletion confirmation
     val onDeleteConfirmed = {
         entryToDelete?.let { entry ->
             mockWorkoutLogState.remove(entry)
@@ -70,9 +86,8 @@ fun LogScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Registro de Treino") }, // Updated Title
+                title = { Text("Registro de Treino") },
                 actions = {
-                    // Menu (Favoritos, Configurações, Ajuda)
                     IconButton(onClick = { showMenu = !showMenu }) {
                         Icon(Icons.Default.MoreVert, "Menu")
                     }
@@ -88,13 +103,12 @@ fun LogScreen(
             BottomNavigationBar(navController = navController)
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { navController.navigate("start_workout") }) { // Navigate to new screen
+            FloatingActionButton(onClick = { navController.navigate("start_workout") }) {
                 Icon(Icons.Default.Add, contentDescription = "Registrar Novo Treino")
             }
         }
     ) { innerPadding ->
         if (mockWorkoutLogState.isEmpty()) {
-
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -110,7 +124,6 @@ fun LogScreen(
                 }
             }
         } else {
-            // Lista de registros de treino (Histórico)
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -124,7 +137,14 @@ fun LogScreen(
                 items(mockWorkoutLogState, key = { it.id }) { logEntry ->
                     WorkoutLogCard(
                         logEntry = logEntry,
-                        onEdit = { /* TODO: Navigate to Edit Screen or show Dialog */ },
+                        isExpanded = expandedLogId == logEntry.id,
+                        onExpandClick = {
+                            expandedLogId = if (expandedLogId == logEntry.id) null else logEntry.id
+                        },
+                        onEditClick = {
+                            // --- AÇÃO DE NAVEGAÇÃO IMPLEMENTADA ---
+                            navController.navigate("edit_workout/${logEntry.id}")
+                        },
                         onDelete = {
                             entryToDelete = logEntry
                             showDeleteConfirmationDialog = true
@@ -134,7 +154,6 @@ fun LogScreen(
             }
         }
 
-        // Delete Confirmation Dialog
         if (showDeleteConfirmationDialog) {
             AlertDialog(
                 onDismissRequest = { showDeleteConfirmationDialog = false; entryToDelete = null },
@@ -159,7 +178,9 @@ fun LogScreen(
 @Composable
 fun WorkoutLogCard(
     logEntry: WorkoutLogEntry,
-    onEdit: () -> Unit,
+    isExpanded: Boolean,
+    onExpandClick: () -> Unit,
+    onEditClick: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
@@ -174,12 +195,26 @@ fun WorkoutLogCard(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )
-                // Edit and Delete Buttons
                 Row {
-                    IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Edit, contentDescription = "Editar Registro", tint = MaterialTheme.colorScheme.secondary)
+                    // Botão para Editar
+                    IconButton(onClick = onEditClick, modifier = Modifier.size(24.dp)) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Editar",
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
+                    // Botão para Expandir/Recolher
+                    IconButton(onClick = onExpandClick, modifier = Modifier.size(24.dp)) {
+                        Icon(
+                            if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = "Mostrar Detalhes",
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    // Botão de Deletar
                     IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Default.Delete, contentDescription = "Excluir Registro", tint = MaterialTheme.colorScheme.error)
                     }
@@ -187,12 +222,10 @@ fun WorkoutLogCard(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
-
             Text(
                 text = "Data: ${dateFormatter.format(logEntry.startTime)}",
                 style = MaterialTheme.typography.bodyMedium
             )
-
             Spacer(modifier = Modifier.height(8.dp))
 
             Row(
@@ -202,24 +235,73 @@ fun WorkoutLogCard(
                 val durationMinutes = TimeUnit.MILLISECONDS.toMinutes(logEntry.durationMillis)
                 StatRow(icon = Icons.Default.Timer, label = "Duração", value = "${durationMinutes} min")
                 logEntry.caloriesBurned?.let {
-                    StatRow(icon = Icons.Default.LocalFireDepartment, label = "Calorias", value = "${it} kcal")
+                    StatRow(icon = Icons.Default.LocalFireDepartment, label = "Calorias", value = "$it kcal")
                 }
             }
 
             logEntry.notes?.takeIf { it.isNotBlank() }?.let {
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                Divider(modifier = Modifier.padding(vertical = 12.dp))
                 Text(
                     text = "Notas: $it",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
 
-            // TODO: Optionally display a summary of performed exercises
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically(animationSpec = tween(300)),
+                exit = shrinkVertically(animationSpec = tween(300))
+            ) {
+                PerformedExercisesDetails(exercises = logEntry.performedExercises)
+            }
         }
     }
 }
 
-// StatRow composable remains the same as before
+@Composable
+fun PerformedExercisesDetails(exercises: List<PerformedExercise>) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp)
+    ) {
+        Divider()
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "Exercícios Realizados",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (exercises.isEmpty()) {
+            Text(
+                text = "Nenhum exercício foi registrado para este treino.",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            )
+        } else {
+            exercises.forEach { exercise ->
+                Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                    Text(
+                        text = exercise.exerciseName,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    exercise.sets.forEachIndexed { index, set ->
+                        Text(
+                            text = "  • Set ${index + 1}: ${set.reps} reps com ${set.weight} kg",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 @Composable
 fun StatRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {

@@ -13,37 +13,53 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.example.gymlog.models.profileData // Import the existing profile data
+import coil.compose.AsyncImage
+import com.example.gymlog.R
+import com.example.gymlog.models.profileData
 import com.example.gymlog.ui.components.BottomNavigationBar
+import com.example.gymlog.ui.viewmodel.AuthViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
-    navController: NavController
+    navController: NavController,
+    authViewModel: AuthViewModel
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    val userProfile = profileData // Use the mock profile data
+    val userProfile = profileData
+
+    var userName by remember { mutableStateOf("Carregando...") }
+    var userPhotoUrl by remember { mutableStateOf<String?>(null) }
+
+    // Busca os dados do usuário (nome e foto) do Firebase quando a tela é iniciada
+    LaunchedEffect(Unit) {
+        authViewModel.getUserName { name ->
+            userName = name ?: userProfile.name
+        }
+        authViewModel.getUserPhotoUrl { url ->
+            userPhotoUrl = url
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Perfil") },
                 actions = {
-                    // Edit Profile Button (Optional)
+                    // Botão para editar perfil (funcionalidade futura)
                     IconButton(onClick = { /* TODO: Navigate to Edit Profile Screen */ }) {
                         Icon(
                             imageVector = Icons.Default.Edit,
                             contentDescription = "Editar Perfil"
                         )
                     }
-                    // Standard Menu
+                    // Menu de três pontinhos
                     IconButton(onClick = { showMenu = !showMenu }) {
                         Icon(
                             imageVector = Icons.Default.MoreVert,
@@ -85,10 +101,12 @@ fun ProfileScreen(
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Profile Picture
-            Image(
-                painter = painterResource(id = userProfile.profilePicture),
+            // Imagem de Perfil carregada da Internet com Coil
+            AsyncImage(
+                model = userPhotoUrl,
                 contentDescription = "Foto de Perfil",
+                placeholder = painterResource(id = R.drawable.profile), // Imagem padrão enquanto carrega
+                error = painterResource(id = R.drawable.profile),       // Imagem padrão em caso de erro
                 modifier = Modifier
                     .size(150.dp)
                     .clip(CircleShape)
@@ -98,16 +116,16 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // User Name
+            // Nome do Usuário
             Text(
-                text = userProfile.name,
+                text = userName,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold
             )
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Profile Details Card
+            // Card de Detalhes do Perfil
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -120,16 +138,15 @@ fun ProfileScreen(
                     Divider()
                     ProfileDetailItem(icon = Icons.Default.FitnessCenter, label = "Peso", value = "${userProfile.weight} kg")
                     Divider()
-                    // Placeholder for other details like Age, Goals etc.
-                    ProfileDetailItem(icon = Icons.Default.Cake, label = "Idade", value = "28 anos") // Example
+                    ProfileDetailItem(icon = Icons.Default.Cake, label = "Idade", value = "28 anos")
                     Divider()
-                    ProfileDetailItem(icon = Icons.Default.Flag, label = "Objetivo", value = "Ganho de Massa") // Example
+                    ProfileDetailItem(icon = Icons.Default.Flag, label = "Objetivo", value = "Ganho de Massa")
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Placeholder for Statistics or Achievements
+            // Card de Estatísticas
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -148,9 +165,16 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Logout Button (Example)
+            // Botão de Logout
             OutlinedButton(
-                onClick = { /* TODO: Implement Logout Logic */ },
+                onClick = {
+                    authViewModel.logout()
+                    navController.navigate("login") {
+                        popUpTo(navController.graph.startDestinationId) {
+                            inclusive = true
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.Logout, contentDescription = null)
@@ -161,8 +185,9 @@ fun ProfileScreen(
     }
 }
 
+// Funções auxiliares para os itens da UI
 @Composable
-fun ProfileDetailItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String) {
+fun ProfileDetailItem(icon: ImageVector, label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically

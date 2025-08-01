@@ -1,7 +1,6 @@
 package com.example.gymlog.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,7 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -23,31 +22,29 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.gymlog.models.*
+import com.example.gymlog.utils.RestTimerNotifier
 import kotlinx.coroutines.delay
 import java.util.*
-import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActiveWorkoutScreen(
     navController: NavController,
-    workoutIdOrCustom: String // Can be routine ID (Int as String) or "custom"
+    workoutIdOrCustom: String
 ) {
     val isCustomWorkout = workoutIdOrCustom == "custom"
     val routineId = workoutIdOrCustom.toIntOrNull()
+    val context = LocalContext.current // Contexto para a notificação
 
-    // Find the routine or set up for custom
     val workoutRoutine = remember { mockWorkoutRoutines.find { it.id == routineId } }
     val workoutName = workoutRoutine?.name ?: "Treino Personalizado"
 
-    // State for the ongoing workout log entry
     var currentLogEntry by remember {
         mutableStateOf(
             WorkoutLogEntry(
                 routineId = routineId,
                 workoutName = workoutName,
                 startTime = Date(),
-                // Initialize with exercises from routine or empty for custom
                 performedExercises = workoutRoutine?.exercises?.map { exercise ->
                     PerformedExercise(
                         exerciseId = exercise.id,
@@ -61,93 +58,99 @@ fun ActiveWorkoutScreen(
         )
     }
 
-    // State for the Rest Timer
     var showRestTimerDialog by rememberSaveable { mutableStateOf(false) }
-    var restTimerSeconds by rememberSaveable { mutableStateOf(60) } // Default rest time
+    var restTimerSeconds by rememberSaveable { mutableStateOf(60) }
     var currentRestTime by rememberSaveable { mutableStateOf(0) }
     var isRestTimerRunning by rememberSaveable { mutableStateOf(false) }
-
-    // State for adding custom exercises
     var showAddExerciseDialog by remember { mutableStateOf(false) }
 
-    // Timer Coroutine
+    // Efeito para controlar o timer e disparar a notificação
     LaunchedEffect(isRestTimerRunning, currentRestTime) {
         if (isRestTimerRunning && currentRestTime > 0) {
             delay(1000L)
             currentRestTime--
         } else if (currentRestTime == 0 && isRestTimerRunning) {
             isRestTimerRunning = false
-            // Optionally add a sound/vibration feedback here
+            // --- AÇÃO QUANDO O TIMER TERMINA ---
+            RestTimerNotifier.showNotification(context)
         }
     }
 
-    // Function to add a set to an exercise
     val addSet = { exerciseIndex: Int ->
-        val exercise = currentLogEntry.performedExercises[exerciseIndex]
-        val lastSet = exercise.sets.lastOrNull()
-        exercise.sets.add(
-            PerformedSet(
-                reps = lastSet?.reps ?: exercise.targetReps,
-                weight = lastSet?.weight ?: exercise.targetWeight
+        val exercises = currentLogEntry.performedExercises.toMutableList()
+        if (exerciseIndex in exercises.indices) {
+            val exerciseToUpdate = exercises[exerciseIndex]
+            val lastSet = exerciseToUpdate.sets.lastOrNull()
+            val newSet = PerformedSet(
+                reps = lastSet?.reps ?: exerciseToUpdate.targetReps,
+                weight = lastSet?.weight ?: exerciseToUpdate.targetWeight
             )
-        )
-        // Trigger recomposition by creating a new list
-        currentLogEntry = currentLogEntry.copy(performedExercises = currentLogEntry.performedExercises.toMutableList())
-    }
-
-    // Function to update a set
-    val updateSet = { exerciseIndex: Int, setIndex: Int, reps: String, weight: String ->
-        val exercise = currentLogEntry.performedExercises[exerciseIndex]
-        val set = exercise.sets[setIndex]
-        set.reps = reps.toIntOrNull() ?: set.reps
-        set.weight = weight.toDoubleOrNull() ?: set.weight
-        // Trigger recomposition
-        currentLogEntry = currentLogEntry.copy(performedExercises = currentLogEntry.performedExercises.toMutableList())
-    }
-
-    // Function to toggle set completion
-    val toggleSetCompletion = { exerciseIndex: Int, setIndex: Int ->
-        val exercise = currentLogEntry.performedExercises[exerciseIndex]
-        val set = exercise.sets[setIndex]
-        set.isCompleted = !set.isCompleted
-        // Trigger recomposition
-        currentLogEntry = currentLogEntry.copy(performedExercises = currentLogEntry.performedExercises.toMutableList())
-
-        // Start rest timer if set is completed
-        if (set.isCompleted) {
-            currentRestTime = restTimerSeconds
-            isRestTimerRunning = true
-            showRestTimerDialog = true
+            val updatedSets = exerciseToUpdate.sets.toMutableList().apply { add(newSet) }
+            exercises[exerciseIndex] = exerciseToUpdate.copy(sets = updatedSets)
+            currentLogEntry = currentLogEntry.copy(performedExercises = exercises)
         }
     }
 
-    // Function to finish workout
+    val addCustomExercise = { exercise: Exercise ->
+        val newPerformedExercise = PerformedExercise(
+            exerciseId = exercise.id,
+            exerciseName = exercise.name,
+            targetSets = exercise.sets,
+            targetReps = exercise.reps,
+            targetWeight = exercise.weight,
+            sets = mutableListOf(PerformedSet(reps = exercise.reps, weight = exercise.weight))
+        )
+        val updatedExercises = currentLogEntry.performedExercises.toMutableList().apply {
+            add(newPerformedExercise)
+        }
+        currentLogEntry = currentLogEntry.copy(performedExercises = updatedExercises)
+        showAddExerciseDialog = false
+    }
+
+    val updateSet = { exerciseIndex: Int, setIndex: Int, reps: String, weight: String ->
+        val exercises = currentLogEntry.performedExercises.toMutableList()
+        if (exerciseIndex in exercises.indices) {
+            val sets = exercises[exerciseIndex].sets.toMutableList()
+            if (setIndex in sets.indices) {
+                val currentSet = sets[setIndex]
+                sets[setIndex] = currentSet.copy(
+                    reps = reps.toIntOrNull() ?: currentSet.reps,
+                    weight = weight.toDoubleOrNull() ?: currentSet.weight
+                )
+                exercises[exerciseIndex] = exercises[exerciseIndex].copy(sets = sets)
+                currentLogEntry = currentLogEntry.copy(performedExercises = exercises)
+            }
+        }
+    }
+
+    val toggleSetCompletion = { exerciseIndex: Int, setIndex: Int ->
+        val exercises = currentLogEntry.performedExercises.toMutableList()
+        if (exerciseIndex in exercises.indices) {
+            val sets = exercises[exerciseIndex].sets.toMutableList()
+            if (setIndex in sets.indices) {
+                val currentSet = sets[setIndex]
+                sets[setIndex] = currentSet.copy(isCompleted = !currentSet.isCompleted)
+                exercises[exerciseIndex] = exercises[exerciseIndex].copy(sets = sets)
+                currentLogEntry = currentLogEntry.copy(performedExercises = exercises)
+
+                if (sets[setIndex].isCompleted) {
+                    currentRestTime = restTimerSeconds
+                    isRestTimerRunning = true
+                    showRestTimerDialog = true
+                }
+            }
+        }
+    }
+
     val finishWorkout = {
         val endTime = Date()
         val duration = endTime.time - currentLogEntry.startTime.time
         val finishedEntry = currentLogEntry.copy(
             endTime = endTime,
             durationMillis = duration
-            // TODO: Calculate calories burned if possible
         )
-        mockWorkoutLogState.add(0, finishedEntry) // Add to the beginning of the log
-        navController.popBackStack("log", inclusive = false) // Go back to log screen
-    }
-
-    // Function to add a custom exercise
-    val addCustomExercise = { exercise: Exercise ->
-        currentLogEntry.performedExercises.add(
-            PerformedExercise(
-                exerciseId = exercise.id,
-                exerciseName = exercise.name,
-                targetSets = exercise.sets,
-                targetReps = exercise.reps,
-                targetWeight = exercise.weight
-            )
-        )
-        // Add one initial set
-        addSet(currentLogEntry.performedExercises.lastIndex)
-        showAddExerciseDialog = false
+        mockWorkoutLogState.add(0, finishedEntry)
+        navController.popBackStack("log", inclusive = false)
     }
 
     Scaffold(
@@ -155,12 +158,11 @@ fun ActiveWorkoutScreen(
             TopAppBar(
                 title = { Text(workoutName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
-                    IconButton(onClick = { /* TODO: Add confirmation dialog before exiting */ navController.popBackStack() }) {
+                    IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Voltar")
                     }
                 },
                 actions = {
-                    // Finish Workout Button
                     Button(onClick = { finishWorkout() }) {
                         Text("Finalizar")
                     }
@@ -197,22 +199,20 @@ fun ActiveWorkoutScreen(
                 )
             }
 
-            // Button to add exercise in custom mode (alternative to FAB)
-            if (isCustomWorkout) {
+            if (isCustomWorkout && currentLogEntry.performedExercises.isEmpty()) {
                 item {
-                    OutlinedButton(
-                        onClick = { showAddExerciseDialog = true },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Adicionar Exercício")
+                    Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.Add, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                            Spacer(Modifier.height(16.dp))
+                            Text("Treino vazio", style = MaterialTheme.typography.headlineSmall)
+                            Text("Clique no '+' para adicionar o primeiro exercício.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp))
+                        }
                     }
                 }
             }
         }
 
-        // Rest Timer Dialog
         if (showRestTimerDialog) {
             RestTimerDialog(
                 totalSeconds = restTimerSeconds,
@@ -223,14 +223,14 @@ fun ActiveWorkoutScreen(
                 onStart = { isRestTimerRunning = true; if(currentRestTime == 0) currentRestTime = restTimerSeconds },
                 onReset = { currentRestTime = restTimerSeconds; isRestTimerRunning = false },
                 onAddTime = { currentRestTime += 15 },
+                onSubtractTime = { currentRestTime = (currentRestTime - 15).coerceAtLeast(0) }, // <-- Lógica para subtrair
                 onSetTotalTime = { restTimerSeconds = it }
             )
         }
 
-        // Add Exercise Dialog (for custom workouts)
         if (showAddExerciseDialog) {
             AddExerciseDialog(
-                allExercises = exerciseList, // Provide the master list
+                allExercises = exerciseList,
                 onDismiss = { showAddExerciseDialog = false },
                 onExerciseSelected = { addCustomExercise(it) }
             )
@@ -257,13 +257,15 @@ fun PerformedExerciseCard(
             Spacer(modifier = Modifier.height(8.dp))
 
             // Header Row
-            Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
-                Text("Set", modifier = Modifier.weight(0.5f), style = MaterialTheme.typography.labelMedium)
-                Text("Reps", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                Text("Peso (kg)", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                Text("Status", modifier = Modifier.weight(0.8f), style = MaterialTheme.typography.labelMedium)
+            if (exercise.sets.isNotEmpty()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                    Text("Set", modifier = Modifier.weight(0.5f), style = MaterialTheme.typography.labelMedium)
+                    Text("Reps", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                    Text("Peso (kg)", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                    Text("Status", modifier = Modifier.weight(0.8f), style = MaterialTheme.typography.labelMedium)
+                }
+                Divider()
             }
-            Divider()
 
             // Sets List
             exercise.sets.forEachIndexed { setIndex, set ->
@@ -276,7 +278,6 @@ fun PerformedExerciseCard(
                 Divider()
             }
 
-            // Add Set Button
             Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 OutlinedButton(onClick = { onAddSet(exerciseIndex) }) {
                     Icon(Icons.Default.Add, contentDescription = "Adicionar Set")
@@ -317,7 +318,6 @@ fun PerformedSetRow(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
-
         )
 
         OutlinedTextField(
@@ -327,7 +327,6 @@ fun PerformedSetRow(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
-
         )
 
         Checkbox(
@@ -348,7 +347,8 @@ fun RestTimerDialog(
     onStart: () -> Unit,
     onReset: () -> Unit,
     onAddTime: () -> Unit,
-    onSetTotalTime: (Int) -> Unit // Allow changing the default rest time
+    onSubtractTime: () -> Unit, // <-- Novo parâmetro
+    onSetTotalTime: (Int) -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -366,7 +366,6 @@ fun RestTimerDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                // Quick add time buttons
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { onSetTotalTime(30) }, enabled = !isRunning) { Text("30s") }
                     Button(onClick = { onSetTotalTime(60) }, enabled = !isRunning) { Text("60s") }
@@ -375,19 +374,31 @@ fun RestTimerDialog(
             }
         },
         confirmButton = {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            // --- BOTÕES DE CONTROLE ATUALIZADOS ---
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onReset, enabled = !isRunning) {
                     Icon(Icons.Default.Refresh, contentDescription = "Resetar")
                 }
-                IconButton(onClick = if (isRunning) onStop else onStart) {
+                // Botão para subtrair 15s
+                IconButton(onClick = onSubtractTime, enabled = isRunning) {
+                    Icon(Icons.Default.RemoveCircleOutline, contentDescription = "Subtrair 15s")
+                }
+                // Botão de Play/Pause
+                FilledIconButton(
+                    onClick = if (isRunning) onStop else onStart,
+                    modifier = Modifier.size(56.dp)
+                ) {
                     Icon(
                         if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isRunning) "Pausar" else "Iniciar"
+                        contentDescription = if (isRunning) "Pausar" else "Iniciar",
+                        modifier = Modifier.size(32.dp)
                     )
                 }
+                // Botão para adicionar 15s
                 IconButton(onClick = onAddTime, enabled = isRunning) {
-                    Icon(Icons.Default.AddAlarm, contentDescription = "Adicionar 15s")
+                    Icon(Icons.Default.AddCircleOutline, contentDescription = "Adicionar 15s")
                 }
+
                 TextButton(onClick = onDismiss) {
                     Text("Fechar")
                 }
@@ -433,10 +444,9 @@ fun AddExerciseDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onExerciseSelected(exercise) }
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Optional: Add exercise image thumbnail
                             Text(exercise.name, modifier = Modifier.weight(1f))
                             Icon(Icons.Default.Add, contentDescription = "Adicionar")
                         }
@@ -453,7 +463,6 @@ fun AddExerciseDialog(
     )
 }
 
-// Helper function to format time
 fun formatTime(seconds: Int): String {
     val minutes = seconds / 60
     val remainingSeconds = seconds % 60
